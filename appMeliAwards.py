@@ -19,7 +19,7 @@ def conectar_planilha(sheet_id):
     client = gspread.authorize(creds)
     return client.open_by_key(sheet_id)
 
-def ler_perguntas(_):
+def ler_perguntas():
     sheet = conectar_planilha(PERGUNTAS_ID)
     worksheet = sheet.get_worksheet(0)
     df = pd.DataFrame(worksheet.get_all_records())
@@ -38,7 +38,7 @@ def ler_perguntas(_):
         perguntas[tipo] = tipos_avaliacao[tipo]
     return perguntas
 
-def carregar_acessos(_):
+def carregar_acessos():
     sheet = conectar_planilha(ACESSOS_ID)
     acessos = pd.DataFrame(sheet.worksheet("Acessos").get_all_records())
     categorias = pd.DataFrame(sheet.worksheet("Categorias").get_all_records())
@@ -209,8 +209,8 @@ st.markdown(""" <h1 style='text-align: center; color: white; font-family: Montse
     """, unsafe_allow_html=True)
 st.markdown("<h1 style='text-align: center; color: #FFD700;font-family: Montserrat, Arial, sans-serif;'>Programa - Meli Awards<br></h1>", unsafe_allow_html=True)
 
-perguntas_ref = ler_perguntas(PERGUNTA_ARQUIVO)
-acessos, categorias_df = carregar_acessos(ACESSOS_ARQUIVO)
+perguntas_ref = ler_perguntas()
+acessos, categorias_df = carregar_acessos()
 
 if "email_logado" not in st.session_state:
     st.session_state.email_logado = ""
