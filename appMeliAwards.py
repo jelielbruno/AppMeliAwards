@@ -5,7 +5,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import textwrap
 import numpy as np
-import unicodedata
 
 # IDs das planilhas compartilhadas no Google Sheets
 PERGUNTAS_ID = "1-mlYet1m6pN510WN8V-6XEJyDovXdlQN0TLzlr0WcPY"
@@ -13,14 +12,32 @@ ACESSOS_ID = "1p5bzFBwAOAisFZLlt3lqXjDPJG-GfL2xkkm3fxQhQRU"
 RESPOSTAS_ID = "1OKhItXlUwmYGGIVBpNIO_48Hsb5wIRZlZ6a8p_ZbheA"
 ADMIN_PASSWORD = "admin123"
 
-def strip_accents(s):
-    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
-
 def conectar_planilha(sheet_id):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gspread"], scope)
     client = gspread.authorize(creds)
     return client.open_by_key(sheet_id)
+
+def ler_perguntas():
+    # NOVO: espera as colunas exatamente como pedido
+    tipos = ["Comercial", "Técnica", "ESG"]
+    perguntas = {t: [] for t in tipos}
+    sheet = conectar_planilha(PERGUNTAS_ID)
+    worksheet = sheet.get_worksheet(0)
+    df = pd.DataFrame(worksheet.get_all_records())
+    for tipo in tipos:
+        col_pergunta = tipo
+        col_peso = f"Peso_{tipo}"
+        if col_pergunta in df.columns and col_peso in df.columns:
+            for idx, linha in df.iterrows():
+                pergunta = str(linha[col_pergunta]).strip()
+                try:
+                    peso = float(str(linha[col_peso]).replace(",", ".").replace("%", "").strip())
+                except Exception:
+                    peso = 0
+                if pergunta and pergunta.lower() != "nan" and peso > 0:
+                    perguntas[tipo].append((pergunta, peso/100.0))  # Peso em fração, se você preferir porcento multiplique por 1!
+    return perguntas
 
 def padronizar_colunas(df, todas_colunas):
     for col in todas_colunas:
@@ -38,37 +55,6 @@ def atualizar_em_blocos(worksheet, df, bloco=500):
     for i in range(0, len(data), bloco):
         chunk = data[i:i+bloco]
         worksheet.append_rows(headers + chunk if i == 0 else chunk, value_input_option="USER_ENTERED")
-
-def ler_perguntas():
-    sheet = conectar_planilha(PERGUNTAS_ID)
-    worksheet = sheet.get_worksheet(0)
-    df = pd.DataFrame(worksheet.get_all_records())
-    perguntas = {}
-    tipos_avaliacao = ['Comercial', 'Técnica', 'ESG']
-    
-    # Normaliza as colunas: tira acentos e caixa baixa
-    cols_norm = {col: strip_accents(col).lower() for col in df.columns}
-    
-    for tipo in tipos_avaliacao:
-        tipo_norm = strip_accents(tipo).lower()
-        # Encontra colunas para perguntas e pesos
-        cols_questao = [col for col, c_norm in cols_norm.items() if tipo_norm in c_norm and 'peso' not in c_norm]
-        cols_peso   = [col for col, c_norm in cols_norm.items() if tipo_norm in c_norm and 'peso' in c_norm]
-        cols_questao.sort()
-        cols_peso.sort()
-        perguntas_tipo = []
-        for col_q, col_p in zip(cols_questao, cols_peso):
-            for idx in range(len(df)):
-                q = df.at[idx, col_q]
-                p = df.at[idx, col_p]
-                try:
-                    if pd.notnull(q) and pd.notnull(p) and str(q).strip() != "":
-                        peso = float(str(p).replace(",", ".").strip())
-                        perguntas_tipo.append((str(q).strip(), peso))
-                except (ValueError, TypeError):
-                    pass
-        perguntas[tipo] = perguntas_tipo
-    return perguntas
 
 def carregar_acessos():
     sheet = conectar_planilha(ACESSOS_ID)
@@ -102,7 +88,7 @@ def salvar_resposta_ponderada(tipo, email, categoria, fornecedor, respostas, per
     hoje = datetime.now()
     data_str = hoje.strftime("%d/%m/%Y")
     hora_str = hoje.strftime("%H:%M:%S")
-    aba = tipo.capitalize()
+    aba = tipo
     df = obter_df_resposta(aba)
     colunas_fixas = ["Data", "Hora", "E-mail", "Categoria", "Fornecedor"]
     colunas_perguntas = [q for (q, p) in perguntas]
@@ -165,6 +151,7 @@ def wrap_col_names(df, width=25):
     return df
 
 st.set_page_config("Scorecard de Fornecedores", layout="wide", initial_sidebar_state="expanded")
+
 st.markdown("""
 <style>
 body, .stApp {background: #111 !important; color: #fff !important;}
@@ -310,7 +297,6 @@ if st.session_state.pagina == "admin":
         st.dataframe(df_respostas, use_container_width=True, hide_index=True)
         st.download_button('Baixar todas as avaliações (CSV)', df_respostas.to_csv(index=False).encode('utf-8'), file_name='todas_avaliacoes.csv', mime='text/csv')
 
-# ============ AJUSTE AQUI: DEBUG VISUAL PARA PERGUNTAS =============
 if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar Fornecedores":
     tipos = get_opcoes_tipo(st.session_state.email_logado, acessos)
     tipo = st.selectbox("Tipo de avaliação", tipos, key="tipo")
@@ -337,14 +323,13 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
             <div style="font-size: 13px;">
                 <span style="color:#999"><b>1</b> = Ruim &nbsp;&nbsp;&nbsp; <b>2</b> = Regular &nbsp;&nbsp;&nbsp; <b>3</b> = Bom</span>
             </div>""", unsafe_allow_html=True)
-        perguntas = perguntas_ref.get(tipo) or perguntas_ref.get(tipo.capitalize())
-        st.write("Perguntas encontradas:", perguntas)  # AJUSTE DE DEBUG VISUAL!
-        
+        perguntas = perguntas_ref.get(tipo)
+        st.write("Perguntas encontradas:", perguntas)  # debug: remova depois de testar!
         if perguntas is None or len(perguntas) == 0:
             st.error("Não foram encontradas perguntas para esse tipo de avaliação. Verifique a planilha de perguntas!")
             st.stop()
         else:
-            df_respostas = obter_df_resposta(tipo.capitalize())
+            df_respostas = obter_df_resposta(tipo)
             ja_respondeu = False
             if not df_respostas.empty:
                 mask = (
@@ -359,7 +344,7 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
                 with st.form("avaliacao"):
                     notas = {}
                     for idx, (pergunta, peso) in enumerate(perguntas, 1):
-                        st.markdown(f"<b>{idx}. {pergunta} (Peso {peso})</b>", unsafe_allow_html=True)
+                        st.markdown(f"<b>{idx}. {pergunta} (Peso {peso*100:.0f}%)</b>", unsafe_allow_html=True)
                         notas[pergunta] = st.slider(
                             label="Selecione sua nota:",
                             min_value=1,
@@ -384,10 +369,10 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Resumo Fi
     tipos = get_opcoes_tipo(email, acessos)
     mostrou_nota = False
     for tipo_avaliacao in tipos:
-        perguntas_tipo = perguntas_ref.get(tipo_avaliacao) or perguntas_ref.get(tipo_avaliacao.capitalize())
+        perguntas_tipo = perguntas_ref.get(tipo_avaliacao)        
         if not perguntas_tipo:
             continue
-        df_tipo = obter_df_resposta(tipo_avaliacao.capitalize())
+        df_tipo = obter_df_resposta(tipo_avaliacao)
         if df_tipo.empty or "E-mail" not in df_tipo.columns:
             continue
         mask_email = (df_tipo['E-mail'].str.lower() == email.lower())
