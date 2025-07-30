@@ -12,12 +12,29 @@ ACESSOS_ID = "1p5bzFBwAOAisFZLlt3lqXjDPJG-GfL2xkkm3fxQhQRU"
 RESPOSTAS_ID = "1OKhItXlUwmYGGIVBpNIO_48Hsb5wIRZlZ6a8p_ZbheA"
 ADMIN_PASSWORD = "admin123"
 
-# Conectar com Google Sheets
+# Conectar com Google Sheets via st.secrets (modo STREAMLIT CLOUD)
 def conectar_planilha(sheet_id):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gspread"], scope)
     client = gspread.authorize(creds)
     return client.open_by_key(sheet_id)
+
+def padronizar_colunas(df, todas_colunas):
+    for col in todas_colunas:
+        if col not in df.columns:
+            df[col] = ""
+    for col in df.columns:
+        if col not in todas_colunas:
+            df.drop(columns=[col], inplace=True)
+    return df[todas_colunas]
+
+def atualizar_em_blocos(worksheet, df, bloco=500):
+    headers = [df.columns.tolist()]
+    data = df.values.tolist()
+    worksheet.clear()
+    for i in range(0, len(data), bloco):
+        chunk = data[i:i+bloco]
+        worksheet.append_rows(headers + chunk if i == 0 else chunk, value_input_option="USER_ENTERED")
 
 def ler_perguntas():
     sheet = conectar_planilha(PERGUNTAS_ID)
@@ -28,17 +45,18 @@ def ler_perguntas():
     for tipo in tipos_avaliacao.keys():
         cols_questao = [c for c in df.columns if tipo.lower() in str(c).lower() and "peso" not in str(c).lower()]
         cols_peso = [c for c in df.columns if tipo.lower() in str(c).lower() and "peso" in str(c).lower()]
-        cols_questao.sort(); cols_peso.sort()
+        cols_questao.sort()
+        cols_peso.sort()
         for col_q, col_p in zip(cols_questao, cols_peso):
             for idx in range(len(df)):
                 q = df.at[idx, col_q]
                 p = df.at[idx, col_p]
-                if pd.notnull(q) and pd.notnull(p) and str(q).strip() != "":
-                    try:
-                  peso = float(str(p).replace(",", ".").strip())
-                  tipos_avaliacao[tipo].append((str(q).strip(), peso))
-              except ValueError:
-                     pass
+                try:
+                    if pd.notnull(q) and pd.notnull(p) and str(q).strip() != "":
+                        peso = float(str(p).replace(",", ".").strip())
+                        tipos_avaliacao[tipo].append((str(q).strip(), peso))
+                except (ValueError, TypeError):
+                    pass
         perguntas[tipo] = tipos_avaliacao[tipo]
     return perguntas
 
@@ -90,18 +108,13 @@ def salvar_resposta_ponderada(tipo, email, categoria, fornecedor, respostas, per
     nova_linha = [data_str, hora_str, email, categoria, fornecedor] + notas_puras + notas_ponderadas
     nova_df = pd.DataFrame([nova_linha], columns=todas_colunas)
     if not df.empty:
-        for col in todas_colunas:
-            if col not in df.columns:
-                df[col] = ""
-        for col in df.columns:
-            if col not in todas_colunas:
-                nova_df[col] = ""
+        df = padronizar_colunas(df, todas_colunas)
+        nova_df = padronizar_colunas(nova_df, todas_colunas)
         mask = (df['E-mail'].str.lower() == email.lower()) & \
                (df['Categoria'] == categoria) & \
                (df['Fornecedor'] == fornecedor)
         df = df[~mask]
         df = pd.concat([df, nova_df], ignore_index=True)
-        df = df[todas_colunas]
     else:
         df = nova_df
     salvar_df_em_planilha(aba, df)
@@ -111,14 +124,9 @@ def salvar_df_em_planilha(aba, df):
     sheet = conectar_planilha(RESPOSTAS_ID)
     try:
         worksheet = sheet.worksheet(aba)
-        worksheet.clear()
     except:
-        worksheet = sheet.add_worksheet(title=aba, rows="1000", cols="50")
-    worksheet.update([df.columns.values.tolist()] + df.values.tolist())
-
-def salvar_excel(tabela: dict):
-    for aba, df in tabela.items():
-        salvar_df_em_planilha(aba, df)
+        worksheet = sheet.add_worksheet(title=aba, rows=str(len(df)), cols=str(len(df.columns)))
+    atualizar_em_blocos(worksheet, df)
 
 def checar_usuario(email, tipo, categoria, acessos):
     filtro = (
@@ -148,60 +156,47 @@ def wrap_col_names(df, width=25):
 
 st.set_page_config("Scorecard de Fornecedores", layout="wide", initial_sidebar_state="expanded")
 
-# ======================================
 # CSS: Modo escuro total e campos custom dark By: Bruno Jeliel
-# ======================================
 st.markdown("""
-    <style>
-    body, .stApp {background: #111 !important; color: #fff !important;}
-    section[data-testid="stSidebar"] {background: #181818 !important;color: #fff !important;}
-    /* Input fields */
-    input, textarea, select {
-        background-color: #181818 !important;
-        color: #fff !important;
-    }
-    /* Streamlit Selectbox/dropdown e opcionais, SIMULA SEMPRE ESCURO */
-    div[data-baseweb="select"], div[data-baseweb="select"] * {
-        background-color: #181818 !important;
-        color: #fff !important;
-        border-color: #FFD700 !important;
-    }
-    /* Placeholders nos selectbox */
-    .css-1wa3eu0-placeholder, .css-14el2xx-placeholder, .css-1u9des2-indicatorSeparator {color: #ccc !important;}
-    /* Itens marcados ou destacados */
-    [role="option"] {color:#fff !important;background:#181818 !important;}
-    .stSelectbox>div>div>div>div {color: #fff !important;}
-    /* Botões Streamlit */
-    .stButton>button, .stFormSubmitButton>button, .css-1x8cf1d, .stDownloadButton>button {
-        background-color: #222 !important;
-        border: 1.5px solid #FFD700 !important;
-        color: #fff !important;
-        font-weight: bold;
-        border-radius:8px !important;
-        padding:6px 20px !important;
-    }
-    .stButton>button:focus, .stButton>button:hover, .stFormSubmitButton>button:focus, .stFormSubmitButton>button:hover {
-        background-color: #FFD700 !important;
-        color: #222 !important;
-    }
-    /* Checkboxes & Radios no modo escuro */
-    .stCheckbox>label, .stRadio>label, .stRadio>div>div, .stRadio>div {color:#fff !important;}
-    .stRadio [data-baseweb="radio"] {background-color:#181818 !important;}
-    /* Slider (barra e ponteiro) */
-    .stSlider, .stSlider > div {color:#fff !important;}
-    .stSlider [role="slider"] {background: #FFD700 !important;}
-    .stSlider .css-14xtw13, .stSlider .css-1yycgk5 {background: #181818;}
-    /* Scrollbar escuro */
-    ::-webkit-scrollbar, ::-webkit-scrollbar-thumb {background: #222 !important;border-radius:6px;}
-    /* DataFrame headers/células */
-    .stDataFrame .css-1v9z3k5 {background: #222 !important;color: #FFD700 !important;font-weight: bold;}
-    .stDataFrame .css-1qg05tj {color: #fff !important;background: #161616 !important;}
-    /* Textos especiais */
-    .stMarkdown, .stHeader, h1,h2,h3,h4,h5 {font-family: 'Montserrat', 'Arial', sans-serif !important;}
-    /* Placeholders e help/erro */
-    .st-curriculum {color:#FFD700 !important;}
-    .stAlert, .css-1kyxreq, .st-cc, .css-vfskoc {background:#222 !important;color:#FFD700 !important;}
-    </style>
+<style>
+body, .stApp {background: #111 !important; color: #fff !important;}
+section[data-testid="stSidebar"] {background: #181818 !important;color: #fff !important;}
+input, textarea, select {
+    background-color: #181818 !important;
+    color: #fff !important;
+}
+div[data-baseweb="select"], div[data-baseweb="select"] * {
+    background-color: #181818 !important;
+    color: #fff !important;
+    border-color: #FFD700 !important;
+}
+.css-1wa3eu0-placeholder, .css-14el2xx-placeholder, .css-1u9des2-indicatorSeparator {color: #ccc !important;}
+[role="option"] {color:#fff !important;background:#181818 !important;}
+.stSelectbox>div>div>div>div {color: #fff !important;}
+.stButton>button, .stFormSubmitButton>button, .css-1x8cf1d, .stDownloadButton>button {
+    background-color: #222 !important;
+    border: 1.5px solid #FFD700 !important;
+    color: #fff !important;
+    font-weight: bold;
+    border-radius:8px !important;
+    padding:6px 20px !important;
+}
+.stButton>button:focus, .stButton>button:hover, .stFormSubmitButton>button:focus, .stFormSubmitButton>button:hover {
+    background-color: #FFD700 !important;
+    color: #222 !important;
+}
+.stCheckbox>label, .stRadio>label, .stRadio>div>div, .stRadio>div {color:#fff !important;}
+.stRadio [data-baseweb="radio"] {background-color:#181818 !important;}
+.stSlider, .stSlider > div {color:#fff !important;}
+.stSlider [role="slider"] {background: #FFD700 !important;}
+.stSlider .css-14xtw13, .stSlider .css-1yycgk5 {background: #181818;}
+::-webkit-scrollbar, ::-webkit-scrollbar-thumb {background: #222 !important;border-radius:6px;}
+.stDataFrame .css-1v9z3k5 {background: #222 !important;color: #FFD700 !important;font-weight: bold;}
+.stDataFrame .css-1qg05tj {color: #fff !important;background: #161616 !important;}
+.stMarkdown, .stHeader, h1,h2,h3,h4,h5 {font-family: 'Montserrat', 'Arial', sans-serif !important;}
+.st-curriculum {color:#FFD700 !important;}
+.stAlert, .css-1kyxreq, .st-cc, .css-vfskoc {background:#222 !important;color:#FFD700 !important;}
+</style>
 """, unsafe_allow_html=True)
 
 # LOGO CENTRALIZADO
@@ -225,7 +220,7 @@ if "pagina" not in st.session_state:
 if "admin_mode" not in st.session_state:
     st.session_state.admin_mode = False
 
-# -------- Sidebar consistente + botão sair --------
+# Sidebar consistente + botão sair
 with st.sidebar:
     if st.session_state.pagina == "login":
         st.title("Menu")
@@ -372,7 +367,6 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
                             tipo, st.session_state.email_logado, categoria, fornecedor_selecionado, notas, perguntas
                         )
                         st.session_state.fornecedores_responsaveis.setdefault(tipo, []).append(fornecedor_selecionado)
-                        salvar_excel({aba: df_atualizada})
                         st.success("Avaliação registrada com sucesso!")
 
 # Prévia das Notas
@@ -418,7 +412,7 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Resumo Fi
         if st.button("Encerrar Avaliação"):
             st.session_state.clear()
             st.rerun()
-
+            
 if st.session_state.pagina == "Final":
     st.markdown(
         """
