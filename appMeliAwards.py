@@ -151,48 +151,63 @@ def wrap_col_names(df, width=25):
 
 st.set_page_config("Scorecard de Fornecedores", layout="wide", initial_sidebar_state="expanded")
 
+# ======================================
+# CSS: Modo escuro total e campos custom dark By: Bruno Jeliel
+# ======================================
 st.markdown("""
-<style>
-body, .stApp {background: #111 !important; color: #fff !important;}
-section[data-testid="stSidebar"] {background: #181818 !important;color: #fff !important;}
-input, textarea, select {
-    background-color: #181818 !important;
-    color: #fff !important;
-}
-div[data-baseweb="select"], div[data-baseweb="select"] * {
-    background-color: #181818 !important;
-    color: #fff !important;
-    border-color: #FFD700 !important;
-}
-.css-1wa3eu0-placeholder, .css-14el2xx-placeholder, .css-1u9des2-indicatorSeparator {color: #ccc !important;}
-[role="option"] {color:#fff !important;background:#181818 !important;}
-.stSelectbox>div>div>div>div {color: #fff !important;}
-.stButton>button, .stFormSubmitButton>button, .css-1x8cf1d, .stDownloadButton>button {
-    background-color: #222 !important;
-    border: 1.5px solid #FFD700 !important;
-    color: #fff !important;
-    font-weight: bold;
-    border-radius:8px !important;
-    padding:6px 20px !important;
-}
-.stButton>button:focus, .stButton>button:hover, .stFormSubmitButton>button:focus, .stFormSubmitButton>button:hover {
-    background-color: #FFD700 !important;
-    color: #222 !important;
-}
-.stCheckbox>label, .stRadio>label, .stRadio>div>div, .stRadio>div {color:#fff !important;}
-.stRadio [data-baseweb="radio"] {background-color:#181818 !important;}
-.stSlider, .stSlider > div {color:#fff !important;}
-.stSlider [role="slider"] {background: #FFD700 !important;}
-.stSlider .css-14xtw13, .stSlider .css-1yycgk5 {background: #181818;}
-::-webkit-scrollbar, ::-webkit-scrollbar-thumb {background: #222 !important;border-radius:6px;}
-.stDataFrame .css-1v9z3k5 {background: #222 !important;color: #FFD700 !important;font-weight: bold;}
-.stDataFrame .css-1qg05tj {color: #fff !important;background: #161616 !important;}
-.stMarkdown, .stHeader, h1,h2,h3,h4,h5 {font-family: 'Montserrat', 'Arial', sans-serif !important;}
-.st-curriculum {color:#FFD700 !important;}
-.stAlert, .css-1kyxreq, .st-cc, .css-vfskoc {background:#222 !important;color:#FFD700 !important;}
-</style>
+    <style>
+    body, .stApp {background: #111 !important; color: #fff !important;}
+    section[data-testid="stSidebar"] {background: #181818 !important;color: #fff !important;}
+    /* Input fields */
+    input, textarea, select {
+        background-color: #181818 !important;
+        color: #fff !important;
+    }
+    /* Streamlit Selectbox/dropdown e opcionais, SIMULA SEMPRE ESCURO */
+    div[data-baseweb="select"], div[data-baseweb="select"] * {
+        background-color: #181818 !important;
+        color: #fff !important;
+        border-color: #FFD700 !important;
+    }
+    /* Placeholders nos selectbox */
+    .css-1wa3eu0-placeholder, .css-14el2xx-placeholder, .css-1u9des2-indicatorSeparator {color: #ccc !important;}
+    /* Itens marcados ou destacados */
+    [role="option"] {color:#fff !important;background:#181818 !important;}
+    .stSelectbox>div>div>div>div {color: #fff !important;}
+    /* Botões Streamlit */
+    .stButton>button, .stFormSubmitButton>button, .css-1x8cf1d, .stDownloadButton>button {
+        background-color: #222 !important;
+        border: 1.5px solid #FFD700 !important;
+        color: #fff !important;
+        font-weight: bold;
+        border-radius:8px !important;
+        padding:6px 20px !important;
+    }
+    .stButton>button:focus, .stButton>button:hover, .stFormSubmitButton>button:focus, .stFormSubmitButton>button:hover {
+        background-color: #FFD700 !important;
+        color: #222 !important;
+    }
+    /* Checkboxes & Radios no modo escuro */
+    .stCheckbox>label, .stRadio>label, .stRadio>div>div, .stRadio>div {color:#fff !important;}
+    .stRadio [data-baseweb="radio"] {background-color:#181818 !important;}
+    /* Slider (barra e ponteiro) */
+    .stSlider, .stSlider > div {color:#fff !important;}
+    .stSlider [role="slider"] {background: #FFD700 !important;}
+    .stSlider .css-14xtw13, .stSlider .css-1yycgk5 {background: #181818;}
+    /* Scrollbar escuro */
+    ::-webkit-scrollbar, ::-webkit-scrollbar-thumb {background: #222 !important;border-radius:6px;}
+    /* DataFrame headers/células */
+    .stDataFrame .css-1v9z3k5 {background: #222 !important;color: #FFD700 !important;font-weight: bold;}
+    .stDataFrame .css-1qg05tj {color: #fff !important;background: #161616 !important;}
+    /* Textos especiais */
+    .stMarkdown, .stHeader, h1,h2,h3,h4,h5 {font-family: 'Montserrat', 'Arial', sans-serif !important;}
+    /* Placeholders e help/erro */
+    .st-curriculum {color:#FFD700 !important;}
+    .stAlert, .css-1kyxreq, .st-cc, .css-vfskoc {background:#222 !important;color:#FFD700 !important;}
+    </style>
 """, unsafe_allow_html=True)
 
+# LOGO CENTRALIZADO
 col1, col2, col3, col4, col5 = st.columns([1,2,2,2,1])
 with col3:
     st.image("MeliAwards.png", width=550)
