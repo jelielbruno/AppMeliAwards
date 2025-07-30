@@ -5,6 +5,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import textwrap
 import numpy as np
+import unicodedata
 
 # IDs das planilhas compartilhadas no Google Sheets
 PERGUNTAS_ID = "1-mlYet1m6pN510WN8V-6XEJyDovXdlQN0TLzlr0WcPY"
@@ -12,7 +13,9 @@ ACESSOS_ID = "1p5bzFBwAOAisFZLlt3lqXjDPJG-GfL2xkkm3fxQhQRU"
 RESPOSTAS_ID = "1OKhItXlUwmYGGIVBpNIO_48Hsb5wIRZlZ6a8p_ZbheA"
 ADMIN_PASSWORD = "admin123"
 
-# Conectar com Google Sheets via st.secrets (modo STREAMLIT CLOUD)
+def strip_accents(s):
+    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+
 def conectar_planilha(sheet_id):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gspread"], scope)
@@ -41,12 +44,19 @@ def ler_perguntas():
     worksheet = sheet.get_worksheet(0)
     df = pd.DataFrame(worksheet.get_all_records())
     perguntas = {}
-    tipos_avaliacao = {'Comercial': [], 'Técnica': [], 'ESG': []}
-    for tipo in tipos_avaliacao.keys():
-        cols_questao = [c for c in df.columns if tipo.lower() in str(c).lower() and "peso" not in str(c).lower()]
-        cols_peso = [c for c in df.columns if tipo.lower() in str(c).lower() and "peso" in str(c).lower()]
+    tipos_avaliacao = ['Comercial', 'Técnica', 'ESG']
+    
+    # Normaliza as colunas: tira acentos e caixa baixa
+    cols_norm = {col: strip_accents(col).lower() for col in df.columns}
+    
+    for tipo in tipos_avaliacao:
+        tipo_norm = strip_accents(tipo).lower()
+        # Encontra colunas para perguntas e pesos
+        cols_questao = [col for col, c_norm in cols_norm.items() if tipo_norm in c_norm and 'peso' not in c_norm]
+        cols_peso   = [col for col, c_norm in cols_norm.items() if tipo_norm in c_norm and 'peso' in c_norm]
         cols_questao.sort()
         cols_peso.sort()
+        perguntas_tipo = []
         for col_q, col_p in zip(cols_questao, cols_peso):
             for idx in range(len(df)):
                 q = df.at[idx, col_q]
@@ -54,10 +64,10 @@ def ler_perguntas():
                 try:
                     if pd.notnull(q) and pd.notnull(p) and str(q).strip() != "":
                         peso = float(str(p).replace(",", ".").strip())
-                        tipos_avaliacao[tipo].append((str(q).strip(), peso))
+                        perguntas_tipo.append((str(q).strip(), peso))
                 except (ValueError, TypeError):
                     pass
-        perguntas[tipo] = tipos_avaliacao[tipo]
+        perguntas[tipo] = perguntas_tipo
     return perguntas
 
 def carregar_acessos():
@@ -155,8 +165,6 @@ def wrap_col_names(df, width=25):
     return df
 
 st.set_page_config("Scorecard de Fornecedores", layout="wide", initial_sidebar_state="expanded")
-
-# CSS: Modo escuro total e campos custom dark By: Bruno Jeliel
 st.markdown("""
 <style>
 body, .stApp {background: #111 !important; color: #fff !important;}
@@ -199,7 +207,6 @@ div[data-baseweb="select"], div[data-baseweb="select"] * {
 </style>
 """, unsafe_allow_html=True)
 
-# LOGO CENTRALIZADO
 col1, col2, col3, col4, col5 = st.columns([1,2,2,2,1])
 with col3:
     st.image("MeliAwards.png", width=550)
@@ -220,7 +227,6 @@ if "pagina" not in st.session_state:
 if "admin_mode" not in st.session_state:
     st.session_state.admin_mode = False
 
-# Sidebar consistente + botão sair
 with st.sidebar:
     if st.session_state.pagina == "login":
         st.title("Menu")
@@ -247,7 +253,6 @@ with st.sidebar:
             st.session_state.clear()
             st.rerun()
 
-# LOGIN
 if st.session_state.pagina == "login":
     with st.form("login_form"):
         email = st.text_input("Seu e-mail corporativo").strip()
@@ -276,7 +281,6 @@ if st.session_state.pagina == "login":
             st.session_state.admin_mode = False
             st.rerun()
 
-# Painel admin
 if st.session_state.pagina == "admin":
     st.title("Painel Administrador")
     df_respostas = obter_todas_respostas()
@@ -306,7 +310,7 @@ if st.session_state.pagina == "admin":
         st.dataframe(df_respostas, use_container_width=True, hide_index=True)
         st.download_button('Baixar todas as avaliações (CSV)', df_respostas.to_csv(index=False).encode('utf-8'), file_name='todas_avaliacoes.csv', mime='text/csv')
 
-# Avaliação
+# ============ AJUSTE AQUI: DEBUG VISUAL PARA PERGUNTAS =============
 if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar Fornecedores":
     tipos = get_opcoes_tipo(st.session_state.email_logado, acessos)
     tipo = st.selectbox("Tipo de avaliação", tipos, key="tipo")
@@ -333,8 +337,13 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
             <div style="font-size: 13px;">
                 <span style="color:#999"><b>1</b> = Ruim &nbsp;&nbsp;&nbsp; <b>2</b> = Regular &nbsp;&nbsp;&nbsp; <b>3</b> = Bom</span>
             </div>""", unsafe_allow_html=True)
-        perguntas = perguntas_ref.get(tipo.capitalize()) or perguntas_ref.get(tipo)
-        if perguntas:
+        perguntas = perguntas_ref.get(tipo) or perguntas_ref.get(tipo.capitalize())
+        st.write("Perguntas encontradas:", perguntas)  # AJUSTE DE DEBUG VISUAL!
+        
+        if perguntas is None or len(perguntas) == 0:
+            st.error("Não foram encontradas perguntas para esse tipo de avaliação. Verifique a planilha de perguntas!")
+            st.stop()
+        else:
             df_respostas = obter_df_resposta(tipo.capitalize())
             ja_respondeu = False
             if not df_respostas.empty:
@@ -369,14 +378,13 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
                         st.session_state.fornecedores_responsaveis.setdefault(tipo, []).append(fornecedor_selecionado)
                         st.success("Avaliação registrada com sucesso!")
 
-# Prévia das Notas
 if st.session_state.email_logado != "" and st.session_state.pagina == "Resumo Final":
     st.subheader("Resumo Final das Suas Avaliações")
     email = st.session_state.email_logado
     tipos = get_opcoes_tipo(email, acessos)
     mostrou_nota = False
     for tipo_avaliacao in tipos:
-        perguntas_tipo = perguntas_ref.get(tipo_avaliacao.capitalize()) or perguntas_ref.get(tipo_avaliacao)
+        perguntas_tipo = perguntas_ref.get(tipo_avaliacao) or perguntas_ref.get(tipo_avaliacao.capitalize())
         if not perguntas_tipo:
             continue
         df_tipo = obter_df_resposta(tipo_avaliacao.capitalize())
@@ -412,7 +420,7 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Resumo Fi
         if st.button("Encerrar Avaliação"):
             st.session_state.clear()
             st.rerun()
-            
+
 if st.session_state.pagina == "Final":
     st.markdown(
         """
