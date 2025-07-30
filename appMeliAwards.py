@@ -1,146 +1,107 @@
 import streamlit as st
 import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
-import textwrap
 import numpy as np
+import textwrap
+from datetime import datetime
+from google.cloud import bigquery
+from google.oauth2 import service_account
+import json
 
-# IDs das planilhas compartilhadas no Google Sheets
-PERGUNTAS_ID = "1-mlYet1m6pN510WN8V-6XEJyDovXdlQN0TLzlr0WcPY"
-ACESSOS_ID = "1p5bzFBwAOAisFZLlt3lqXjDPJG-GfL2xkkm3fxQhQRU"
-RESPOSTAS_ID = "1OKhItXlUwmYGGIVBpNIO_48Hsb5wIRZlZ6a8p_ZbheA"
+# IDs das tabelas no BigQuery
+TABELA_PERGUNTAS = "meli-sbox.PROCUREMENTBRASIL.TB_MELIAWARDS_PERGUNTAS"
+TABELA_ACESSOS = "meli-sbox.PROCUREMENTBRASIL.TB_MELIAWARDS_ACESSOS"
+TABELA_RESPOSTAS_TECNICA = "meli-sbox.PROCUREMENTBRASIL.TB_MELIAWARDS_RESPOSTAS_TECNICA"
 ADMIN_PASSWORD = "admin123"
 
-# Conectar com Google Sheets
-def conectar_planilha(sheet_id):
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gspread"], scope)
-    client = gspread.authorize(creds)
-    return client.open_by_key(sheet_id)
+# Conexão com BigQuery
+@st.cache_resource
+def conectar_bigquery():
+    creds_dict = st.secrets["gcp_service_account"]
+    credentials = service_account.Credentials.from_service_account_info(creds_dict)
+    client = bigquery.Client(credentials=credentials, project=credentials.project_id)
+    return client
 
+# Carrega perguntas do BigQuery
 def ler_perguntas():
-    sheet = conectar_planilha(PERGUNTAS_ID)
-    worksheet = sheet.get_worksheet(0)
-    df = pd.DataFrame(worksheet.get_all_records())
-    perguntas = {}
-    tipos_avaliacao = {'Comercial': [], 'Técnica': [], 'ESG': []}
-    for tipo in tipos_avaliacao.keys():
-        cols_questao = [c for c in df.columns if tipo.lower() in str(c).lower() and "peso" not in str(c).lower()]
-        cols_peso = [c for c in df.columns if tipo.lower() in str(c).lower() and "peso" in str(c).lower()]
-        cols_questao.sort(); cols_peso.sort()
-        for col_q, col_p in zip(cols_questao, cols_peso):
-            for idx in range(len(df)):
-                q = df.at[idx, col_q]
-                p = df.at[idx, col_p]
-                if pd.notnull(q) and pd.notnull(p) and str(q).strip() != "":
-                    tipos_avaliacao[tipo].append((str(q).strip(), float(p)))
-        perguntas[tipo] = tipos_avaliacao[tipo]
+    client = conectar_bigquery()
+    query = f"""
+        SELECT tipo, pergunta, peso
+        FROM `{TABELA_PERGUNTAS}`
+        WHERE pergunta IS NOT NULL AND peso IS NOT NULL
+    """
+    df = client.query(query).to_dataframe()
+    perguntas = {'Comercial': [], 'Técnica': [], 'ESG': []}
+    for tipo in perguntas.keys():
+        df_tipo = df[df['tipo'].str.lower() == tipo.lower()]
+        for _, row in df_tipo.iterrows():
+            perguntas[tipo].append((row['pergunta'], float(row['peso'])))
     return perguntas
 
+# Carrega acessos e categorias
 def carregar_acessos():
-    sheet = conectar_planilha(ACESSOS_ID)
-    acessos = pd.DataFrame(sheet.worksheet("Acessos").get_all_records())
-    categorias = pd.DataFrame(sheet.worksheet("Categorias").get_all_records())
+    client = conectar_bigquery()
+    query = f"""
+        SELECT * FROM `{TABELA_ACESSOS}`
+    """
+    df = client.query(query).to_dataframe()
+    acessos = df[['email', 'tipo', 'categoria']].copy()
+    categorias = df[['categoria', 'fornecedor']].dropna().drop_duplicates()
     return acessos, categorias
 
-def obter_df_resposta(aba):
-    sheet = conectar_planilha(RESPOSTAS_ID)
-    try:
-        worksheet = sheet.worksheet(aba)
-        data = worksheet.get_all_records()
-        return pd.DataFrame(data)
-    except:
-        return pd.DataFrame()
-
-def obter_todas_respostas():
-    abas = ['Comercial', 'Técnica', 'ESG']
-    frames = []
-    for aba in abas:
-        df = obter_df_resposta(aba)
-        if not df.empty:
-            df['Tipo'] = aba
-            frames.append(df)
-    if frames:
-        return pd.concat(frames, ignore_index=True)
-    else:
-        return pd.DataFrame()
-
-def salvar_resposta_ponderada(tipo, email, categoria, fornecedor, respostas, perguntas):
-    hoje = datetime.now()
-    data_str = hoje.strftime("%d/%m/%Y")
-    hora_str = hoje.strftime("%H:%M:%S")
-    aba = tipo.capitalize()
-    df = obter_df_resposta(aba)
-    colunas_fixas = ["Data", "Hora", "E-mail", "Categoria", "Fornecedor"]
-    colunas_perguntas = [q for (q, p) in perguntas]
-    colunas_ponderada = [q + " (PONDERADA)" for (q, p) in perguntas]
-    todas_colunas = colunas_fixas + colunas_perguntas + colunas_ponderada
-    notas_puras = []
-    notas_ponderadas = []
-    for (pergunta, peso) in perguntas:
-        nota = respostas[pergunta]
-        notas_puras.append(nota)
-        ponderada = nota * peso
-        notas_ponderadas.append(ponderada)
-    nova_linha = [data_str, hora_str, email, categoria, fornecedor] + notas_puras + notas_ponderadas
-    nova_df = pd.DataFrame([nova_linha], columns=todas_colunas)
-    if not df.empty:
-        for col in todas_colunas:
-            if col not in df.columns:
-                df[col] = ""
-        for col in df.columns:
-            if col not in todas_colunas:
-                nova_df[col] = ""
-        mask = (df['E-mail'].str.lower() == email.lower()) & \
-               (df['Categoria'] == categoria) & \
-               (df['Fornecedor'] == fornecedor)
-        df = df[~mask]
-        df = pd.concat([df, nova_df], ignore_index=True)
-        df = df[todas_colunas]
-    else:
-        df = nova_df
-    salvar_df_em_planilha(aba, df)
-    return aba, df
-
-def salvar_df_em_planilha(aba, df):
-    sheet = conectar_planilha(RESPOSTAS_ID)
-    try:
-        worksheet = sheet.worksheet(aba)
-        worksheet.clear()
-    except:
-        worksheet = sheet.add_worksheet(title=aba, rows="1000", cols="50")
-    worksheet.update([df.columns.values.tolist()] + df.values.tolist())
-
-def salvar_excel(tabela: dict):
-    for aba, df in tabela.items():
-        salvar_df_em_planilha(aba, df)
-
+# Checa se o usuário tem acesso
 def checar_usuario(email, tipo, categoria, acessos):
     filtro = (
-        (acessos.iloc[:, 0].str.lower() == email.lower()) &
-        (acessos.iloc[:, 1].str.lower() == tipo.lower()) &
-        (acessos.iloc[:, 2] == categoria)
+        (acessos['email'].str.lower() == email.lower()) &
+        (acessos['tipo'].str.lower() == tipo.lower()) &
+        (acessos['categoria'] == categoria)
     )
     return not acessos[filtro].empty
 
 def get_opcoes_tipo(email, acessos):
-    return acessos[acessos.iloc[:,0].str.lower() == email.lower()].iloc[:,1].dropna().unique().tolist()
+    return acessos[acessos['email'].str.lower() == email.lower()]['tipo'].dropna().unique().tolist()
 
 def get_opcoes_categorias(email, tipo, acessos):
     return acessos[
-        (acessos.iloc[:,0].str.lower() == email.lower()) &
-        (acessos.iloc[:,1].str.lower() == tipo.lower())
-    ].iloc[:,2].dropna().unique().tolist()
+        (acessos['email'].str.lower() == email.lower()) &
+        (acessos['tipo'].str.lower() == tipo.lower())
+    ]['categoria'].dropna().unique().tolist()
 
 def fornecedores_para_categoria(categoria, categorias):
-    fornecedores = categorias[categorias.iloc[:,0] == categoria].iloc[:,1].dropna().tolist()
-    return fornecedores
+    return categorias[categorias['categoria'] == categoria]['fornecedor'].dropna().tolist()
+
+def obter_df_resposta(aba):
+    client = conectar_bigquery()
+    if aba.lower() == "técnica":
+        query = f"SELECT * FROM `{TABELA_RESPOSTAS_TECNICA}`"
+        return client.query(query).to_dataframe()
+    return pd.DataFrame()
+
+def obter_todas_respostas():
+    df = obter_df_resposta("Técnica")
+    df['Tipo'] = "Técnica"
+    return df
+
+def salvar_resposta_ponderada(tipo, email, categoria, fornecedor, respostas, perguntas):
+    hoje = datetime.now()
+    data_str = hoje.strftime("%Y-%m-%d")
+    hora_str = hoje.strftime("%H:%M:%S")
+    colunas = ["data", "hora", "email", "categoria", "fornecedor", "pergunta", "nota", "ponderada"]
+    linhas = []
+    for pergunta, peso in perguntas:
+        nota = respostas[pergunta]
+        ponderada = nota * peso
+        linhas.append([data_str, hora_str, email, categoria, fornecedor, pergunta, nota, ponderada])
+    df = pd.DataFrame(linhas, columns=colunas)
+    client = conectar_bigquery()
+    job = client.load_table_from_dataframe(df, TABELA_RESPOSTAS_TECNICA)
+    job.result()
+    return "Técnica", df
 
 def wrap_col_names(df, width=25):
     df = df.copy()
     df.columns = ['\n'.join(textwrap.wrap(str(col), width=width)) for col in df.columns]
     return df
+
 
 st.set_page_config("Scorecard de Fornecedores", layout="wide", initial_sidebar_state="expanded")
 
