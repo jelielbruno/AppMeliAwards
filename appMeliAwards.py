@@ -324,8 +324,7 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
                 <span style="color:#999"><b>1</b> = Ruim &nbsp;&nbsp;&nbsp; <b>2</b> = Regular &nbsp;&nbsp;&nbsp; <b>3</b> = Bom</span>
             </div>""", unsafe_allow_html=True)
         perguntas = perguntas_ref.get(tipo)
-        st.write("Perguntas encontradas:", perguntas)  # debug: remova depois de testar!
-        if perguntas is None or len(perguntas) == 0:
+               if perguntas is None or len(perguntas) == 0:
             st.error("Não foram encontradas perguntas para esse tipo de avaliação. Verifique a planilha de perguntas!")
             st.stop()
         else:
