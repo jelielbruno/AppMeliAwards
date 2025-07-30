@@ -19,7 +19,6 @@ def conectar_planilha(sheet_id):
     return client.open_by_key(sheet_id)
 
 def ler_perguntas():
-    # NOVO: espera as colunas exatamente como pedido
     tipos = ["Comercial", "Técnica", "ESG"]
     perguntas = {t: [] for t in tipos}
     sheet = conectar_planilha(PERGUNTAS_ID)
@@ -36,7 +35,7 @@ def ler_perguntas():
                 except Exception:
                     peso = 0
                 if pergunta and pergunta.lower() != "nan" and peso > 0:
-                    perguntas[tipo].append((pergunta, peso/100.0))  # Peso em fração, se você preferir porcento multiplique por 1!
+                    perguntas[tipo].append((pergunta, peso/100.0))
     return perguntas
 
 def padronizar_colunas(df, todas_colunas):
@@ -324,7 +323,7 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
                 <span style="color:#999"><b>1</b> = Ruim &nbsp;&nbsp;&nbsp; <b>2</b> = Regular &nbsp;&nbsp;&nbsp; <b>3</b> = Bom</span>
             </div>""", unsafe_allow_html=True)
         perguntas = perguntas_ref.get(tipo)
-               if perguntas is None or len(perguntas) == 0:
+        if perguntas is None or len(perguntas) == 0:
             st.error("Não foram encontradas perguntas para esse tipo de avaliação. Verifique a planilha de perguntas!")
             st.stop()
         else:
