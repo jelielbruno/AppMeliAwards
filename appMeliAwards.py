@@ -34,7 +34,11 @@ def ler_perguntas():
                 q = df.at[idx, col_q]
                 p = df.at[idx, col_p]
                 if pd.notnull(q) and pd.notnull(p) and str(q).strip() != "":
-                    tipos_avaliacao[tipo].append((str(q).strip(), float(p)))
+                    try:
+                  peso = float(str(p).replace(",", ".").strip())
+                  tipos_avaliacao[tipo].append((str(q).strip(), peso))
+              except ValueError:
+                     pass
         perguntas[tipo] = tipos_avaliacao[tipo]
     return perguntas
 
