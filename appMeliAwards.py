@@ -382,15 +382,14 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Resumo Fi
             categoria_ = linha['Categoria']
             fornecedor_ = linha['Fornecedor']
             st.markdown(f"**[{tipo_avaliacao}] | {categoria_} | {fornecedor_}**")
-            colunas_ponderadas = [q + " (PONDERADA)" for (q, _) in perguntas_tipo if (q + " (PONDERADA)") in linha]
-            notas_ponderadas = [(q, linha[q + " (PONDERADA)"] if (q + " (PONDERADA)") in linha else None) for (q, _) in perguntas_tipo]
-            soma_ponderada = sum([val for (q, val) in notas_ponderadas if pd.notnull(val)])
+            # NOVO: Mostrar as notas atribuídas (de 1 a 3)
+            colunas_perguntas = [q for (q, _) in perguntas_tipo]
+            notas_atribuidas = [(q, linha[q] if q in linha else None) for q in colunas_perguntas]
             df_show = pd.DataFrame({
                 "Questão": [q for (q, _) in perguntas_tipo],
-                "Nota Ponderada": [linha[q + " (PONDERADA)"] if (q + " (PONDERADA)") in linha else None for (q, _) in perguntas_tipo]
+                "Nota Atribuída": [linha[q] if q in linha else None for q in colunas_perguntas]
             })
             st.dataframe(df_show, use_container_width=True, hide_index=True)
-            st.markdown(f"**Resultado Final (Soma das Notas Ponderadas):** `{soma_ponderada:.2f}`")
             st.markdown("---")
     if not mostrou_nota:
         st.info("Você ainda não realizou nenhuma avaliação.")
@@ -403,39 +402,3 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Resumo Fi
         if st.button("Encerrar Avaliação"):
             st.session_state.clear()
             st.rerun()
-
-if st.session_state.pagina == "Final":
-    st.markdown(
-        """
-        <style>
-        .my-modal-bg {
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
-            background: rgba(0,0,0,0.40); z-index: 99999;
-            display: flex; align-items: center; justify-content: center;
-        }
-        .my-modal-box {
-            background: #222; border-radius: 18px; padding: 40px 36px 30px 36px;
-            max-width: 97vw; width: 420px; text-align: center; box-shadow: 0 0 40px #0002;
-            border: 1.5px solid #888;
-            color: #fff;
-        }
-        .my-modal-box h3 { margin-bottom: 25px; }
-        .my-modal-sair { font-size: 1.14em; margin-top:10px; padding:12px 30px;
-        border-radius:9px;border:none;background:#ffd700;color:#222;cursor:pointer;}
-        </style>
-        <div class="my-modal-bg">
-            <div class="my-modal-box">
-                <h3>
-                    Avaliação finalizada, notas atribuídas com sucesso.<br>
-                    <span style="font-weight:normal">Obrigado pela contribuição!</span>
-                </h3>
-                <form action="" method="post">
-                    <button class="my-modal-sair" type="submit" name="sairfake">Sair</button>
-                </form>
-            </div>
-        </div>
-        """, unsafe_allow_html=True
-    )
-    if st.form("sairfake").form_submit_button("sairfake", type="primary"):
-        st.session_state.clear()
-        st.rerun()
