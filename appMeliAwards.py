@@ -12,6 +12,12 @@ ACESSOS_ID = "1p5bzFBwAOAisFZLlt3lqXjDPJG-GfL2xkkm3fxQhQRU"
 RESPOSTAS_ID = "1OKhItXlUwmYGGIVBpNIO_48Hsb5wIRZlZ6a8p_ZbheA"
 ADMIN_PASSWORD = "admin123"
 
+# Escala de notas para Comercial, Técnica e ESG
+NOTAS_COM_TEC = [1.0, 1.3, 1.5, 1.7, 2.0, 2.3, 2.5, 2.7, 3.0]
+
+# --------------------------------------------------------------------------------
+# Conexão com Google Sheets
+# --------------------------------------------------------------------------------
 def conectar_planilha(sheet_id):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gspread"], scope)
@@ -28,7 +34,7 @@ def ler_perguntas():
         col_pergunta = tipo
         col_peso = f"Peso_{tipo}"
         if col_pergunta in df.columns and col_peso in df.columns:
-            for idx, linha in df.iterrows():
+            for _, linha in df.iterrows():
                 pergunta = str(linha[col_pergunta]).strip()
                 try:
                     peso = float(str(linha[col_peso]).replace(",", ".").replace("%", "").strip())
@@ -42,7 +48,7 @@ def padronizar_colunas(df, todas_colunas):
     for col in todas_colunas:
         if col not in df.columns:
             df[col] = ""
-    for col in df.columns:
+    for col in list(df.columns):
         if col not in todas_colunas:
             df.drop(columns=[col], inplace=True)
     return df[todas_colunas]
@@ -149,73 +155,52 @@ def wrap_col_names(df, width=25):
     df.columns = ['\n'.join(textwrap.wrap(str(col), width=width)) for col in df.columns]
     return df
 
+# --------------------------------------------------------------------------------
+# Configuração de página e CSS
+# --------------------------------------------------------------------------------
 st.set_page_config("Scorecard de Fornecedores", layout="wide", initial_sidebar_state="expanded")
 
-# ======================================
-# CSS: Modo escuro total e campos custom dark By: Bruno Jeliel
-# ======================================
 st.markdown("""
     <style>
     body, .stApp {background: #111 !important; color: #fff !important;}
     section[data-testid="stSidebar"] {background: #181818 !important;color: #fff !important;}
-    /* Input fields */
-    input, textarea, select {
-        background-color: #181818 !important;
-        color: #fff !important;
-    }
-    /* Streamlit Selectbox/dropdown e opcionais, SIMULA SEMPRE ESCURO */
-    div[data-baseweb="select"], div[data-baseweb="select"] * {
-        background-color: #181818 !important;
-        color: #fff !important;
-        border-color: #FFD700 !important;
-    }
-    /* Placeholders nos selectbox */
+    input, textarea, select { background-color: #181818 !important; color: #fff !important; }
+    div[data-baseweb="select"], div[data-baseweb="select"] * { background-color: #181818 !important; color: #fff !important; border-color: #FFD700 !important; }
     .css-1wa3eu0-placeholder, .css-14el2xx-placeholder, .css-1u9des2-indicatorSeparator {color: #ccc !important;}
-    /* Itens marcados ou destacados */
     [role="option"] {color:#fff !important;background:#181818 !important;}
     .stSelectbox>div>div>div>div {color: #fff !important;}
-    /* Botões Streamlit */
-    .stButton>button, .stFormSubmitButton>button, .css-1x8cf1d, .stDownloadButton>button {
-        background-color: #222 !important;
-        border: 1.5px solid #FFD700 !important;
-        color: #fff !important;
-        font-weight: bold;
-        border-radius:8px !important;
-        padding:6px 20px !important;
+    .stButton>button, .stFormSubmitButton>button, .stDownloadButton>button {
+        background-color: #222 !important; border: 1.5px solid #FFD700 !important; color: #fff !important; font-weight: bold; border-radius:8px !important; padding:6px 20px !important;
     }
-    .stButton>button:focus, .stButton>button:hover, .stFormSubmitButton>button:focus, .stFormSubmitButton>button:hover {
-        background-color: #FFD700 !important;
-        color: #222 !important;
-    }
-    /* Checkboxes & Radios no modo escuro */
+    .stButton>button:focus, .stButton>button:hover, .stFormSubmitButton>button:focus, .stFormSubmitButton>button:hover { background-color: #FFD700 !important; color: #222 !important; }
     .stCheckbox>label, .stRadio>label, .stRadio>div>div, .stRadio>div {color:#fff !important;}
     .stRadio [data-baseweb="radio"] {background-color:#181818 !important;}
-    /* Slider (barra e ponteiro) */
     .stSlider, .stSlider > div {color:#fff !important;}
     .stSlider [role="slider"] {background: #FFD700 !important;}
     .stSlider .css-14xtw13, .stSlider .css-1yycgk5 {background: #181818;}
-    /* Scrollbar escuro */
     ::-webkit-scrollbar, ::-webkit-scrollbar-thumb {background: #222 !important;border-radius:6px;}
-    /* DataFrame headers/células */
     .stDataFrame .css-1v9z3k5 {background: #222 !important;color: #FFD700 !important;font-weight: bold;}
     .stDataFrame .css-1qg05tj {color: #fff !important;background: #161616 !important;}
-    /* Textos especiais */
     .stMarkdown, .stHeader, h1,h2,h3,h4,h5 {font-family: 'Montserrat', 'Arial', sans-serif !important;}
-    /* Placeholders e help/erro */
-    .st-curriculum {color:#FFD700 !important;}
-    .stAlert, .css-1kyxreq, .st-cc, .css-vfskoc {background:#222 !important;color:#FFD700 !important;}
+    .stAlert {background:#222 !important;color:#FFD700 !important;}
+    .nota-scale { display: flex; justify-content: space-between; margin-top: 6px; margin-bottom: 10px; font-size: 12px; color: #bbb; font-family: 'Montserrat', 'Arial', sans-serif; }
+    .nota-scale span { min-width: 16px; text-align: center; }
     </style>
 """, unsafe_allow_html=True)
 
-# LOGO CENTRALIZADO
+# --------------------------------------------------------------------------------
+# Logo e Títulos
+# --------------------------------------------------------------------------------
 col1, col2, col3, col4, col5 = st.columns([1,2,2,2,1])
 with col3:
     st.image("MeliAwards.png", width=550)
 
-st.markdown(""" <h1 style='text-align: center; color: white; font-family: Montserrat, Arial, sans-serif;'>Scorecard de Fornecedores<br></h1>
-    """, unsafe_allow_html=True)
+st.markdown(""" <h1 style='text-align: center; color: white; font-family: Montserrat, Arial, sans-serif;'>Scorecard de Fornecedores<br></h1>""", unsafe_allow_html=True)
 st.markdown("<h1 style='text-align: center; color: #FFD700;font-family: Montserrat, Arial, sans-serif;'>Programa - Meli Awards<br></h1>", unsafe_allow_html=True)
 
+# --------------------------------------------------------------------------------
+# Estado de sessão
+# --------------------------------------------------------------------------------
 perguntas_ref = ler_perguntas()
 acessos, categorias_df = carregar_acessos()
 
@@ -228,11 +213,14 @@ if "pagina" not in st.session_state:
 if "admin_mode" not in st.session_state:
     st.session_state.admin_mode = False
 
+# --------------------------------------------------------------------------------
+# Sidebar
+# --------------------------------------------------------------------------------
 with st.sidebar:
     if st.session_state.pagina == "login":
         st.title("Menu")
         st.info("Acesse e preencha o seu Scorecard")
-    elif st.session_state.pagina == "admin":
+    elif st.session_state.pagina == "admin" and st.session_state.admin_mode:
         st.title("Painel Admin")
         st.info("Gerenciamento e relatórios")
         if st.button("Sair do Painel Admin") or st.button("Sair"):
@@ -254,6 +242,9 @@ with st.sidebar:
             st.session_state.clear()
             st.rerun()
 
+# --------------------------------------------------------------------------------
+# Login
+# --------------------------------------------------------------------------------
 if st.session_state.pagina == "login":
     with st.form("login_form"):
         email = st.text_input("Seu e-mail corporativo").strip()
@@ -282,35 +273,192 @@ if st.session_state.pagina == "login":
             st.session_state.admin_mode = False
             st.rerun()
 
-if st.session_state.pagina == "admin":
+# --------------------------------------------------------------------------------
+# Painel Admin (SOMENTE quando admin_mode True e pagina == "admin")
+# --------------------------------------------------------------------------------
+if st.session_state.pagina == "admin" and st.session_state.admin_mode:
     st.title("Painel Administrador")
+
+    # Carrega todas as respostas (Comercial, Técnica e ESG) já concatenadas
     df_respostas = obter_todas_respostas()
+
     if df_respostas.empty:
         st.warning("Nenhuma avaliação registrada ainda.")
     else:
-        st.info(f"Total de avaliações registradas: **{len(df_respostas)}**")
-        tipo_data = df_respostas.groupby("Tipo").agg({"E-mail": "count"}).rename(columns={"E-mail": "Qtd. Avaliações"})
-        st.bar_chart(tipo_data)
-        fornecedor_data = df_respostas.groupby("Fornecedor").agg({"E-mail": "count"}).rename(columns={"E-mail": "Qtd. Avaliações"}).sort_values("Qtd. Avaliações", ascending=False)
-        st.subheader("Avaliações por Fornecedor")
-        st.bar_chart(fornecedor_data)
-        ponderadas_cols = [col for col in df_respostas.columns if "PONDERADA" in col]
-        medias_ponderadas = {}
-        for forn in fornecedor_data.index:
-            df_forn = df_respostas[df_respostas["Fornecedor"] == forn]
-            vals = []
-            for idx, row in df_forn.iterrows():
-                total_pond = sum([row[col] for col in ponderadas_cols if col in row and pd.notnull(row[col])])
-                vals.append(total_pond)
-            if vals:
-                medias_ponderadas[forn] = np.mean(vals)
-        if medias_ponderadas:
-            st.subheader("Média das Notas Ponderadas por Fornecedor")
-            st.bar_chart(pd.DataFrame(medias_ponderadas.values(), index=medias_ponderadas.keys(), columns=["Média Ponderada"]))
-        st.subheader("Todas as Avaliações")
-        st.dataframe(df_respostas, use_container_width=True, hide_index=True)
-        st.download_button('Baixar todas as avaliações (CSV)', df_respostas.to_csv(index=False).encode('utf-8'), file_name='todas_avaliacoes.csv', mime='text/csv')
+        st.info(f"Total de registros de avaliações: {len(df_respostas)}")
 
+        # Recalcular o total ponderado por linha a partir das notas puras e dos pesos atuais
+        pesos_map = {}
+        for tipo_nome, lista_q in perguntas_ref.items():
+            pesos_map[tipo_nome] = {q: float(p) for (q, p) in lista_q}  # p já é fração (ex.: 0.15)
+
+        def _to_float(x):
+            try:
+                return float(str(x).replace(",", "."))
+            except Exception:
+                return np.nan
+
+        def recalc_total_por_linha(row):
+            tipo = str(row.get("Tipo", "")).strip()
+            pesos = pesos_map.get(tipo, {})
+            total = 0.0
+            for q, w in pesos.items():
+                if q in row:
+                    v = _to_float(row[q])
+                    if pd.notnull(v):
+                        total += v * w
+            return total
+
+        df_respostas["Total Ponderado (recalc)"] = df_respostas.apply(recalc_total_por_linha, axis=1)
+
+        # 1) Top 3 Fornecedores por Categoria (Nota Final = (Comercial + Técnica + ESG) / 3)
+        st.subheader("Top 3 Fornecedores por Categoria (Nota Final = (Comercial + Técnica + ESG) / 3)")
+        req_cols_top3 = ["Categoria", "Fornecedor", "Tipo", "Total Ponderado (recalc)"]
+        faltando_top3 = [c for c in req_cols_top3 if c not in df_respostas.columns]
+        if faltando_top3:
+            st.error(f"Colunas ausentes para o Top 3: {faltando_top3}")
+        else:
+            base = df_respostas[req_cols_top3].dropna(subset=["Categoria", "Fornecedor", "Tipo"]).copy()
+            base["Tipo"] = base["Tipo"].astype(str).str.strip()
+
+            # Média por tipo dentro de (Categoria, Fornecedor, Tipo)
+            tipo_media = (
+                base.groupby(["Categoria", "Fornecedor", "Tipo"], as_index=False)["Total Ponderado (recalc)"]
+                .mean()
+                .rename(columns={"Total Ponderado (recalc)": "Média por Tipo"})
+            )
+
+            # Pivot para colunas por Tipo
+            pivot = (
+                tipo_media
+                .pivot_table(index=["Categoria", "Fornecedor"], columns="Tipo", values="Média por Tipo", aggfunc="first")
+                .reset_index()
+            )
+            # Garante colunas dos 3 tipos
+            for t in ["Comercial", "Técnica", "ESG"]:
+                if t not in pivot.columns:
+                    pivot[t] = 0.0
+
+            # Nota Final = (Comercial + Técnica + ESG) / 3 (ausência conta 0)
+            pivot["Nota Final"] = (pivot["Comercial"].fillna(0) + pivot["Técnica"].fillna(0) + pivot["ESG"].fillna(0)) / 3.0
+
+            # Top 3 por categoria
+            top3_list = []
+            for categoria_val, dfcat in pivot.groupby("Categoria", dropna=False):
+                top = (
+                    dfcat.sort_values("Nota Final", ascending=False)
+                    .head(3)[["Categoria", "Fornecedor", "Comercial", "Técnica", "ESG", "Nota Final"]]
+                )
+                top3_list.append(top)
+
+            if top3_list:
+                df_top3 = pd.concat(top3_list, ignore_index=True)
+                st.dataframe(df_top3, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Baixar Top 3 por Categoria (CSV)",
+                    df_top3.to_csv(index=False).encode("utf-8"),
+                    file_name="top3_por_categoria.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.info("Sem dados suficientes para calcular Top 3 por categoria.")
+
+        # 2) Contador de avaliações completas/incompletas por E-mail, Categoria e Tipo
+        st.subheader("Contagem de Avaliações Completas e Incompletas por E-mail, Categoria e Tipo")
+
+        req_cols_cnt = ["E-mail", "Categoria", "Fornecedor", "Tipo"]
+        faltando_cnt = [c for c in req_cols_cnt if c not in df_respostas.columns]
+        if faltando_cnt:
+            st.error(f"Colunas ausentes para esta contagem: {faltando_cnt}")
+        else:
+            # Mapa de questões por tipo
+            questoes_map = {tipo: [q for (q, _) in lista] for tipo, lista in perguntas_ref.items()}
+
+            def conta_respondidas(row):
+                tipo = str(row.get("Tipo", "")).strip()
+                qs = questoes_map.get(tipo, [])
+                respondidas = 0
+                for q in qs:
+                    if q in row:
+                        val = row[q]
+                        if pd.notnull(val) and str(val).strip() != "":
+                            respondidas += 1
+                return pd.Series({"Respondidas": respondidas, "TotalPerguntas": len(qs)})
+
+            tmp = df_respostas.copy()
+            aux = tmp.apply(conta_respondidas, axis=1)
+            tmp["Respondidas"] = aux["Respondidas"]
+            tmp["TotalPerguntas"] = aux["TotalPerguntas"]
+            tmp["Completa?"] = (tmp["TotalPerguntas"] > 0) & (tmp["Respondidas"] == tmp["TotalPerguntas"])
+
+            # Contagem por E-mail, Categoria e Tipo considerando fornecedores distintos
+            completos = (
+                tmp[tmp["Completa?"]]
+                .groupby(["E-mail", "Categoria", "Tipo"], as_index=False)["Fornecedor"]
+                .nunique()
+                .rename(columns={"Fornecedor": "Completas"})
+            )
+            incompletos = (
+                tmp[~tmp["Completa?"]]
+                .groupby(["E-mail", "Categoria", "Tipo"], as_index=False)["Fornecedor"]
+                .nunique()
+                .rename(columns={"Fornecedor": "Incompletas"})
+            )
+
+            contagem = pd.merge(completos, incompletos, on=["E-mail", "Categoria", "Tipo"], how="outer").fillna(0)
+            for c in ["Completas", "Incompletas"]:
+                contagem[c] = contagem[c].astype(int)
+            contagem["Total Fornecedores Avaliados"] = contagem["Completas"] + contagem["Incompletas"]
+
+            if contagem.empty:
+                st.info("Nenhuma avaliação encontrada para compor a contagem.")
+            else:
+                st.dataframe(contagem.sort_values(["E-mail", "Categoria", "Tipo"]), use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Baixar Contagem (CSV)",
+                    contagem.to_csv(index=False).encode("utf-8"),
+                    file_name="contagem_completas_incompletas_por_email_categoria_tipo.csv",
+                    mime="text/csv",
+                )
+
+            st.markdown("Detalhes das avaliações incompletas (por fornecedor):")
+            detalhes_incomp = tmp[~tmp["Completa?"]][
+                ["E-mail", "Categoria", "Tipo", "Fornecedor", "Respondidas", "TotalPerguntas"]
+            ].copy()
+            if detalhes_incomp.empty:
+                st.info("Sem avaliações incompletas.")
+            else:
+                st.dataframe(detalhes_incomp.sort_values(["E-mail", "Categoria", "Tipo", "Fornecedor"]),
+                             use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Baixar Detalhes Incompletas (CSV)",
+                    detalhes_incomp.to_csv(index=False).encode("utf-8"),
+                    file_name="detalhes_avaliacoes_incompletas.csv",
+                    mime="text/csv",
+                )
+
+        # 3) Todas as Avaliações em três tabelas separadas (Comercial, Técnica, ESG)
+        st.subheader("Todas as Avaliações por Tipo")
+        abas = st.tabs(["Comercial", "Técnica", "ESG"])
+        tipos_ordem = ["Comercial", "Técnica", "ESG"]
+
+        for aba_st, tipo_t in zip(abas, tipos_ordem):
+            with aba_st:
+                dft = df_respostas[df_respostas["Tipo"] == tipo_t]
+                if dft.empty:
+                    st.info(f"Sem avaliações do tipo {tipo_t}.")
+                else:
+                    st.dataframe(dft, use_container_width=True, hide_index=True)
+                    st.download_button(
+                        f"Baixar {tipo_t} (CSV)",
+                        dft.to_csv(index=False).encode("utf-8"),
+                        file_name=f"avaliacoes_{tipo_t.lower()}.csv",
+                        mime="text/csv",
+                    )
+
+# --------------------------------------------------------------------------------
+# Avaliação (público não-admin)
+# --------------------------------------------------------------------------------
 if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar Fornecedores":
     tipos = get_opcoes_tipo(st.session_state.email_logado, acessos)
     tipo = st.selectbox("Tipo de avaliação", tipos, key="tipo")
@@ -333,24 +481,28 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
             st.stop()
         st.markdown("---")
         st.header(f"Avaliação {tipo} para {fornecedor_selecionado} ({categoria})")
-        st.markdown("""
+
+        # Legenda com a escala permitida
+        escala_str = " • ".join([str(x).rstrip('0').rstrip('.') for x in NOTAS_COM_TEC])
+        st.markdown(f"""
             <div style="font-size: 13px;">
-                <span style="color:#999"><b>1</b> = Ruim &nbsp;&nbsp;&nbsp; <b>2</b> = Regular &nbsp;&nbsp;&nbsp; <b>3</b> = Bom</span>
+                <span style="color:#999"><b>Escala permitida:</b> {escala_str} &nbsp;&nbsp;&nbsp; <b>1</b> = Ruim &nbsp;&nbsp; <b>3</b> = Bom</span>
             </div>""", unsafe_allow_html=True)
+
         perguntas = perguntas_ref.get(tipo)
         if perguntas is None or len(perguntas) == 0:
             st.error("Não foram encontradas perguntas para esse tipo de avaliação. Verifique a planilha de perguntas!")
             st.stop()
         else:
-            df_respostas = obter_df_resposta(tipo)
+            df_respostas_tipo = obter_df_resposta(tipo)
             ja_respondeu = False
-            if not df_respostas.empty:
+            if not df_respostas_tipo.empty:
                 mask = (
-                    (df_respostas['E-mail'].str.lower() == st.session_state.email_logado.lower()) &
-                    (df_respostas['Categoria'] == categoria) &
-                    (df_respostas['Fornecedor'] == fornecedor_selecionado)
+                    (df_respostas_tipo['E-mail'].str.lower() == st.session_state.email_logado.lower()) &
+                    (df_respostas_tipo['Categoria'] == categoria) &
+                    (df_respostas_tipo['Fornecedor'] == fornecedor_selecionado)
                 )
-                ja_respondeu = df_respostas[mask].shape[0] > 0
+                ja_respondeu = df_respostas_tipo[mask].shape[0] > 0
             if ja_respondeu:
                 st.info("Você já respondeu esta avaliação para essa combinação de tipo, categoria e fornecedor. Só é permitido um envio por usuário.")
             else:
@@ -358,31 +510,36 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
                     notas = {}
                     for idx, (pergunta, peso) in enumerate(perguntas, 1):
                         st.markdown(f"<b>{idx}. {pergunta} (Peso {peso*100:.0f}%)</b>", unsafe_allow_html=True)
-                        notas[pergunta] = st.slider(
+                        # Seletor com opções discretas
+                        notas[pergunta] = st.select_slider(
                             label="Selecione sua nota:",
-                            min_value=1,
-                            max_value=3,
-                            value=2,
-                            step=1,
+                            options=NOTAS_COM_TEC,
+                            value=2.0,
                             key=f"slider_{idx}_{pergunta}"
                         )
+                        # Rótulos das posições possíveis, logo abaixo do seletor
+                        labels = [str(x).rstrip('0').rstrip('.') for x in NOTAS_COM_TEC]
+                        labels_html = '<div class="nota-scale">' + ''.join([f'<span>{v}</span>' for v in labels]) + '</div>'
+                        st.markdown(labels_html, unsafe_allow_html=True)
+
                     submitted = st.form_submit_button("Enviar avaliação")
                     if submitted:
-                        notas_lista = [notas[q] for (q, p) in perguntas]
-                        ponderadas_lista = [notas[q] * p for (q, p) in perguntas]
                         aba, df_atualizada = salvar_resposta_ponderada(
                             tipo, st.session_state.email_logado, categoria, fornecedor_selecionado, notas, perguntas
                         )
                         st.session_state.fornecedores_responsaveis.setdefault(tipo, []).append(fornecedor_selecionado)
                         st.success("Avaliação registrada com sucesso!")
 
+# --------------------------------------------------------------------------------
+# Prévia das Notas (público não-admin)
+# --------------------------------------------------------------------------------
 if st.session_state.email_logado != "" and st.session_state.pagina == "Resumo Final":
     st.subheader("Resumo Final das Suas Avaliações")
     email = st.session_state.email_logado
     tipos = get_opcoes_tipo(email, acessos)
     mostrou_nota = False
     for tipo_avaliacao in tipos:
-        perguntas_tipo = perguntas_ref.get(tipo_avaliacao)        
+        perguntas_tipo = perguntas_ref.get(tipo_avaliacao)
         if not perguntas_tipo:
             continue
         df_tipo = obter_df_resposta(tipo_avaliacao)
@@ -393,13 +550,11 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Resumo Fi
         if respostas_email.empty:
             continue
         mostrou_nota = True
-        for idx, linha in respostas_email.iterrows():
+        for _, linha in respostas_email.iterrows():
             categoria_ = linha['Categoria']
             fornecedor_ = linha['Fornecedor']
             st.markdown(f"**[{tipo_avaliacao}] | {categoria_} | {fornecedor_}**")
-            # NOVO: Mostrar as notas atribuídas (de 1 a 3)
             colunas_perguntas = [q for (q, _) in perguntas_tipo]
-            notas_atribuidas = [(q, linha[q] if q in linha else None) for q in colunas_perguntas]
             df_show = pd.DataFrame({
                 "Questão": [q for (q, _) in perguntas_tipo],
                 "Nota Atribuída": [linha[q] if q in linha else None for q in colunas_perguntas]
@@ -418,6 +573,9 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Resumo Fi
             st.session_state.clear()
             st.rerun()
 
+# --------------------------------------------------------------------------------
+# Tela Final (modal)
+# --------------------------------------------------------------------------------
 if st.session_state.pagina == "Final":
     st.markdown(
         """
