@@ -17,6 +17,44 @@ ADMIN_PASSWORD = "admin123"
 NOTAS_COM_TEC = [1.0, 1.3, 1.5, 1.7, 2.0, 2.3, 2.5, 2.7, 3.0]
 
 # --------------------------------------------------------------------------------
+# Funções utilitárias de formatação numérica
+# --------------------------------------------------------------------------------
+def to_number(value):
+    """Converte textos como '2,7' ou '2.7' para float 2.7; vazio -> NaN."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return np.nan
+    s = str(value).strip()
+    if s == "":
+        return np.nan
+    s = s.replace(",", ".")
+    try:
+        return float(s)
+    except Exception:
+        return np.nan
+
+def format_float_with_comma(value, ndigits=1):
+    """
+    Converte float para string com vírgula:
+      2.7 -> '2,7', 2.0 -> '2,0', respeitando casas decimais.
+    """
+    try:
+        f = float(value)
+    except Exception:
+        return value
+    s = f"{f:.{ndigits}f}"  # '2.7'
+    return s.replace(".", ",")  # '2,7'
+
+def format_df_notes_with_comma(df, pergunta_cols, ponderada_cols, ndigits=1):
+    """
+    Formata colunas de notas puras e ponderadas como strings com vírgula.
+    """
+    df = df.copy()
+    for col in pergunta_cols + ponderada_cols:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: format_float_with_comma(x, ndigits))
+    return df
+
+# --------------------------------------------------------------------------------
 # Mapeamento Tipo -> Nome da Aba na planilha de respostas
 # --------------------------------------------------------------------------------
 def mapear_tipo_para_aba(tipo: str) -> str:
@@ -69,13 +107,20 @@ def padronizar_colunas(df, todas_colunas):
             df.drop(columns=[col], inplace=True)
     return df[todas_colunas]
 
-def atualizar_em_blocos(worksheet, df, bloco=500):
-    headers = [df.columns.tolist()]
-    data = df.values.tolist()
+def atualizar_em_blocos(worksheet, df, colunas_perguntas, colunas_ponderada, bloco=500):
+    """
+    Envia o DataFrame ao Sheets em blocos, com:
+    - cabeçalhos na primeira linha
+    - notas puras e ponderadas formatadas com vírgula
+    - value_input_option="RAW".
+    """
+    df_envio = format_df_notes_with_comma(df, colunas_perguntas, colunas_ponderada, ndigits=1)
+    headers = [df_envio.columns.tolist()]
+    data = df_envio.values.tolist()
     worksheet.clear()
     for i in range(0, len(data), bloco):
         chunk = data[i:i+bloco]
-        worksheet.append_rows(headers + chunk if i == 0 else chunk, value_input_option="USER_ENTERED")
+        worksheet.append_rows(headers + chunk if i == 0 else chunk, value_input_option="RAW")
 
 def carregar_acessos():
     sheet = conectar_planilha(ACESSOS_ID)
@@ -87,13 +132,21 @@ def obter_df_resposta(aba_ou_tipo):
     """
     Recebe um nome de aba ou tipo ("Comercial", "Técnica", "ESG")
     e sempre converte para o nome real da aba usando mapear_tipo_para_aba.
+    Converte colunas de notas em float internamente.
     """
     sheet = conectar_planilha(RESPOSTAS_ID)
     aba_real = mapear_tipo_para_aba(aba_ou_tipo)
     try:
         worksheet = sheet.worksheet(aba_real)
         data = worksheet.get_all_records()
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+        if df.empty:
+            return df
+        # Converter colunas de notas para float interno
+        for col in df.columns:
+            if col not in ["Data", "Hora", "E-mail", "Categoria", "Fornecedor", "Tipo"]:
+                df[col] = df[col].apply(to_number)
+        return df
     except:
         return pd.DataFrame()
 
@@ -115,36 +168,40 @@ def salvar_resposta_ponderada(tipo, email, categoria, fornecedor, respostas, per
     hoje = datetime.now()
     data_str = hoje.strftime("%d/%m/%Y")
     hora_str = hoje.strftime("%H:%M:%S")
-    # IMPORTANTE: usar o mapeamento aqui
     aba = mapear_tipo_para_aba(tipo)
+
     df = obter_df_resposta(aba)
     colunas_fixas = ["Data", "Hora", "E-mail", "Categoria", "Fornecedor"]
     colunas_perguntas = [q for (q, p) in perguntas]
     colunas_ponderada = [q + " (PONDERADA)" for (q, p) in perguntas]
     todas_colunas = colunas_fixas + colunas_perguntas + colunas_ponderada
+
     notas_puras = []
     notas_ponderadas = []
     for (pergunta, peso) in perguntas:
-        nota = respostas[pergunta]
+        nota = to_number(respostas[pergunta])  # slider -> float
         notas_puras.append(nota)
-        ponderada = nota * peso
+        ponderada = nota * peso if nota is not None else np.nan
         notas_ponderadas.append(ponderada)
+
     nova_linha = [data_str, hora_str, email, categoria, fornecedor] + notas_puras + notas_ponderadas
     nova_df = pd.DataFrame([nova_linha], columns=todas_colunas)
+
     if not df.empty:
         df = padronizar_colunas(df, todas_colunas)
         nova_df = padronizar_colunas(nova_df, todas_colunas)
-        mask = (df['E-mail'].str.lower() == email.lower()) & \
+        mask = (df['E-mail'].astype(str).str.lower() == email.lower()) & \
                (df['Categoria'] == categoria) & \
                (df['Fornecedor'] == fornecedor)
         df = df[~mask]
         df = pd.concat([df, nova_df], ignore_index=True)
     else:
         df = nova_df
-    salvar_df_em_planilha(aba, df)
+
+    salvar_df_em_planilha(aba, df, colunas_perguntas, colunas_ponderada)
     return aba, df
 
-def salvar_df_em_planilha(aba, df):
+def salvar_df_em_planilha(aba, df, colunas_perguntas, colunas_ponderada):
     sheet = conectar_planilha(RESPOSTAS_ID)
 
     # Tentar obter a worksheet, se não existir criar
@@ -152,7 +209,6 @@ def salvar_df_em_planilha(aba, df):
         worksheet = sheet.worksheet(aba)
     except WorksheetNotFound:
         try:
-            # Garante pelo menos 1 linha/coluna
             linhas = max(len(df), 1)
             colunas = max(len(df.columns), 1)
             worksheet = sheet.add_worksheet(
@@ -161,7 +217,6 @@ def salvar_df_em_planilha(aba, df):
                 cols=str(colunas)
             )
         except APIError as e:
-            # Mensagem amigável na interface
             st.error(
                 "Não foi possível criar a aba no Google Sheets. "
                 "Possíveis causas:\n"
@@ -170,12 +225,9 @@ def salvar_df_em_planilha(aba, df):
                 "- O usuário de serviço não tem permissão de edição.\n\n"
                 "Entre em contato com o administrador do sistema."
             )
-            # Detalhes técnicos para os logs
             st.write("Detalhes técnicos (para o administrador):", str(e))
-            # Relevanta o erro para aparecer completo nos logs do Streamlit Cloud
             raise
     except APIError as e:
-        # Caso dê outro tipo de erro de API ao buscar a worksheet
         st.error(
             "Erro ao acessar a aba de respostas no Google Sheets. "
             "Tente novamente em alguns instantes. Se o problema persistir, "
@@ -185,7 +237,7 @@ def salvar_df_em_planilha(aba, df):
         raise
 
     # Se chegou aqui, temos uma worksheet válida
-    atualizar_em_blocos(worksheet, df)
+    atualizar_em_blocos(worksheet, df, colunas_perguntas, colunas_ponderada)
 
 def checar_usuario(email, tipo, categoria, acessos):
     filtro = (
@@ -337,7 +389,6 @@ if st.session_state.pagina == "login":
 if st.session_state.pagina == "admin" and st.session_state.admin_mode:
     st.title("Painel Administrador")
 
-    # Carrega todas as respostas (Comercial, Técnica e ESG) já concatenadas
     df_respostas = obter_todas_respostas()
 
     if df_respostas.empty:
@@ -345,16 +396,12 @@ if st.session_state.pagina == "admin" and st.session_state.admin_mode:
     else:
         st.info(f"Total de registros de avaliações: {len(df_respostas)}")
 
-        # Recalcular o total ponderado por linha a partir das notas puras e dos pesos atuais
         pesos_map = {}
         for tipo_nome, lista_q in perguntas_ref.items():
-            pesos_map[tipo_nome] = {q: float(p) for (q, p) in lista_q}  # p já é fração (ex.: 0.15)
+            pesos_map[tipo_nome] = {q: float(p) for (q, p) in lista_q}
 
         def _to_float(x):
-            try:
-                return float(str(x).replace(",", "."))
-            except Exception:
-                return np.nan
+            return to_number(x)
 
         def recalc_total_por_linha(row):
             tipo = str(row.get("Tipo", "")).strip()
@@ -369,7 +416,7 @@ if st.session_state.pagina == "admin" and st.session_state.admin_mode:
 
         df_respostas["Total Ponderado (recalc)"] = df_respostas.apply(recalc_total_por_linha, axis=1)
 
-        # 1) Top 3 Fornecedores por Categoria (Nota Final = (Comercial + Técnica + ESG) / 3)
+        # Top 3
         st.subheader("Top 3 Fornecedores por Categoria (Nota Final = (Comercial + Técnica + ESG) / 3)")
         req_cols_top3 = ["Categoria", "Fornecedor", "Tipo", "Total Ponderado (recalc)"]
         faltando_top3 = [c for c in req_cols_top3 if c not in df_respostas.columns]
@@ -378,29 +425,20 @@ if st.session_state.pagina == "admin" and st.session_state.admin_mode:
         else:
             base = df_respostas[req_cols_top3].dropna(subset=["Categoria", "Fornecedor", "Tipo"]).copy()
             base["Tipo"] = base["Tipo"].astype(str).str.strip()
-
-            # Média por tipo dentro de (Categoria, Fornecedor, Tipo)
             tipo_media = (
                 base.groupby(["Categoria", "Fornecedor", "Tipo"], as_index=False)["Total Ponderado (recalc)"]
                 .mean()
                 .rename(columns={"Total Ponderado (recalc)": "Média por Tipo"})
             )
-
-            # Pivot para colunas por Tipo
             pivot = (
                 tipo_media
                 .pivot_table(index=["Categoria", "Fornecedor"], columns="Tipo", values="Média por Tipo", aggfunc="first")
                 .reset_index()
             )
-            # Garante colunas dos 3 tipos
             for t in ["Comercial", "Técnica", "ESG"]:
                 if t not in pivot.columns:
                     pivot[t] = 0.0
-
-            # Nota Final = (Comercial + Técnica + ESG) / 3 (ausência conta 0)
             pivot["Nota Final"] = (pivot["Comercial"].fillna(0) + pivot["Técnica"].fillna(0) + pivot["ESG"].fillna(0)) / 3.0
-
-            # Top 3 por categoria
             top3_list = []
             for categoria_val, dfcat in pivot.groupby("Categoria", dropna=False):
                 top = (
@@ -408,7 +446,6 @@ if st.session_state.pagina == "admin" and st.session_state.admin_mode:
                     .head(3)[["Categoria", "Fornecedor", "Comercial", "Técnica", "ESG", "Nota Final"]]
                 )
                 top3_list.append(top)
-
             if top3_list:
                 df_top3 = pd.concat(top3_list, ignore_index=True)
                 st.dataframe(df_top3, use_container_width=True, hide_index=True)
@@ -421,7 +458,7 @@ if st.session_state.pagina == "admin" and st.session_state.admin_mode:
             else:
                 st.info("Sem dados suficientes para calcular Top 3 por categoria.")
 
-        # 2) Contador de avaliações completas/incompletas por E-mail, Categoria e Tipo
+        # Contagem completas/incompletas
         st.subheader("Contagem de Avaliações Completas e Incompletas por E-mail, Categoria e Tipo")
 
         req_cols_cnt = ["E-mail", "Categoria", "Fornecedor", "Tipo"]
@@ -429,7 +466,6 @@ if st.session_state.pagina == "admin" and st.session_state.admin_mode:
         if faltando_cnt:
             st.error(f"Colunas ausentes para esta contagem: {faltando_cnt}")
         else:
-            # Mapa de questões por tipo
             questoes_map = {tipo: [q for (q, _) in lista] for tipo, lista in perguntas_ref.items()}
 
             def conta_respondidas(row):
@@ -449,7 +485,6 @@ if st.session_state.pagina == "admin" and st.session_state.admin_mode:
             tmp["TotalPerguntas"] = aux["TotalPerguntas"]
             tmp["Completa?"] = (tmp["TotalPerguntas"] > 0) & (tmp["Respondidas"] == tmp["TotalPerguntas"])
 
-            # Contagem por E-mail, Categoria e Tipo considerando fornecedores distintos
             completos = (
                 tmp[tmp["Completa?"]]
                 .groupby(["E-mail", "Categoria", "Tipo"], as_index=False)["Fornecedor"]
@@ -495,7 +530,7 @@ if st.session_state.pagina == "admin" and st.session_state.admin_mode:
                     mime="text/csv",
                 )
 
-        # 3) Todas as Avaliações em três tabelas separadas (Comercial, Técnica, ESG)
+        # Tabelas por tipo
         st.subheader("Todas as Avaliações por Tipo")
         abas = st.tabs(["Comercial", "Técnica", "ESG"])
         tipos_ordem = ["Comercial", "Técnica", "ESG"]
@@ -556,7 +591,7 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
             ja_respondeu = False
             if not df_respostas_tipo.empty:
                 mask = (
-                    (df_respostas_tipo['E-mail'].str.lower() == st.session_state.email_logado.lower()) &
+                    (df_respostas_tipo['E-mail'].astype(str).str.lower() == st.session_state.email_logado.lower()) &
                     (df_respostas_tipo['Categoria'] == categoria) &
                     (df_respostas_tipo['Fornecedor'] == fornecedor_selecionado)
                 )
@@ -568,14 +603,12 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Avaliar F
                     notas = {}
                     for idx, (pergunta, peso) in enumerate(perguntas, 1):
                         st.markdown(f"<b>{idx}. {pergunta} (Peso {peso*100:.0f}%)</b>", unsafe_allow_html=True)
-                        # Seletor com opções discretas
                         notas[pergunta] = st.select_slider(
                             label="Selecione sua nota:",
                             options=NOTAS_COM_TEC,
                             value=2.0,
                             key=f"slider_{idx}_{pergunta}"
                         )
-                        # Rótulos das posições possíveis, logo abaixo do seletor
                         labels = [str(x).rstrip('0').rstrip('.') for x in NOTAS_COM_TEC]
                         labels_html = '<div class="nota-scale">' + ''.join([f'<span>{v}</span>' for v in labels]) + '</div>'
                         st.markdown(labels_html, unsafe_allow_html=True)
@@ -603,7 +636,7 @@ if st.session_state.email_logado != "" and st.session_state.pagina == "Resumo Fi
         df_tipo = obter_df_resposta(tipo_avaliacao)
         if df_tipo.empty or "E-mail" not in df_tipo.columns:
             continue
-        mask_email = (df_tipo['E-mail'].str.lower() == email.lower())
+        mask_email = (df_tipo['E-mail'].astype(str).str.lower() == email.lower())
         respostas_email = df_tipo[mask_email]
         if respostas_email.empty:
             continue
