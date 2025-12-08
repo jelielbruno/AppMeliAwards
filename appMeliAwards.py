@@ -5,6 +5,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import textwrap
 import numpy as np
+from gspread.exceptions import APIError, WorksheetNotFound  # <-- import extra
 
 # IDs das planilhas compartilhadas no Google Sheets
 PERGUNTAS_ID = "1-mlYet1m6pN510WN8V-6XEJyDovXdlQN0TLzlr0WcPY"
@@ -14,6 +15,21 @@ ADMIN_PASSWORD = "admin123"
 
 # Escala de notas para Comercial, Técnica e ESG
 NOTAS_COM_TEC = [1.0, 1.3, 1.5, 1.7, 2.0, 2.3, 2.5, 2.7, 3.0]
+
+# --------------------------------------------------------------------------------
+# Mapeamento Tipo -> Nome da Aba na planilha de respostas
+# --------------------------------------------------------------------------------
+def mapear_tipo_para_aba(tipo: str) -> str:
+    """
+    Converte o tipo de avaliação no nome da aba da planilha de respostas.
+    - "Comercial" -> "Comercial"
+    - "Técnica"   -> "Técnica"
+    - "ESG"       -> "Esg"  (aba já existente)
+    """
+    tipo_norm = (tipo or "").strip()
+    if tipo_norm.lower() == "esg":
+        return "Esg"  # nome da aba existente na planilha
+    return tipo_norm  # para Comercial e Técnica segue igual
 
 # --------------------------------------------------------------------------------
 # Conexão com Google Sheets
@@ -67,22 +83,28 @@ def carregar_acessos():
     categorias = pd.DataFrame(sheet.worksheet("Categorias").get_all_records())
     return acessos, categorias
 
-def obter_df_resposta(aba):
+def obter_df_resposta(aba_ou_tipo):
+    """
+    Recebe um nome de aba ou tipo ("Comercial", "Técnica", "ESG")
+    e sempre converte para o nome real da aba usando mapear_tipo_para_aba.
+    """
     sheet = conectar_planilha(RESPOSTAS_ID)
+    aba_real = mapear_tipo_para_aba(aba_ou_tipo)
     try:
-        worksheet = sheet.worksheet(aba)
+        worksheet = sheet.worksheet(aba_real)
         data = worksheet.get_all_records()
         return pd.DataFrame(data)
     except:
         return pd.DataFrame()
 
 def obter_todas_respostas():
-    abas = ['Comercial', 'Técnica', 'ESG']
+    # Tipos lógicos
+    tipos_logicos = ['Comercial', 'Técnica', 'ESG']
     frames = []
-    for aba in abas:
-        df = obter_df_resposta(aba)
+    for tipo in tipos_logicos:
+        df = obter_df_resposta(tipo)  # internamente mapeia ESG -> Esg
         if not df.empty:
-            df['Tipo'] = aba
+            df['Tipo'] = tipo  # mantemos o rótulo lógico "ESG"
             frames.append(df)
     if frames:
         return pd.concat(frames, ignore_index=True)
@@ -93,7 +115,8 @@ def salvar_resposta_ponderada(tipo, email, categoria, fornecedor, respostas, per
     hoje = datetime.now()
     data_str = hoje.strftime("%d/%m/%Y")
     hora_str = hoje.strftime("%H:%M:%S")
-    aba = tipo
+    # IMPORTANTE: usar o mapeamento aqui
+    aba = mapear_tipo_para_aba(tipo)
     df = obter_df_resposta(aba)
     colunas_fixas = ["Data", "Hora", "E-mail", "Categoria", "Fornecedor"]
     colunas_perguntas = [q for (q, p) in perguntas]
@@ -123,10 +146,45 @@ def salvar_resposta_ponderada(tipo, email, categoria, fornecedor, respostas, per
 
 def salvar_df_em_planilha(aba, df):
     sheet = conectar_planilha(RESPOSTAS_ID)
+
+    # Tentar obter a worksheet, se não existir criar
     try:
         worksheet = sheet.worksheet(aba)
-    except:
-        worksheet = sheet.add_worksheet(title=aba, rows=str(len(df)), cols=str(len(df.columns)))
+    except WorksheetNotFound:
+        try:
+            # Garante pelo menos 1 linha/coluna
+            linhas = max(len(df), 1)
+            colunas = max(len(df.columns), 1)
+            worksheet = sheet.add_worksheet(
+                title=aba,
+                rows=str(linhas),
+                cols=str(colunas)
+            )
+        except APIError as e:
+            # Mensagem amigável na interface
+            st.error(
+                "Não foi possível criar a aba no Google Sheets. "
+                "Possíveis causas:\n"
+                "- O nome da aba já existe ou é inválido;\n"
+                "- A planilha atingiu o limite de abas;\n"
+                "- O usuário de serviço não tem permissão de edição.\n\n"
+                "Entre em contato com o administrador do sistema."
+            )
+            # Detalhes técnicos para os logs
+            st.write("Detalhes técnicos (para o administrador):", str(e))
+            # Relevanta o erro para aparecer completo nos logs do Streamlit Cloud
+            raise
+    except APIError as e:
+        # Caso dê outro tipo de erro de API ao buscar a worksheet
+        st.error(
+            "Erro ao acessar a aba de respostas no Google Sheets. "
+            "Tente novamente em alguns instantes. Se o problema persistir, "
+            "entre em contato com o administrador."
+        )
+        st.write("Detalhes técnicos (para o administrador):", str(e))
+        raise
+
+    # Se chegou aqui, temos uma worksheet válida
     atualizar_em_blocos(worksheet, df)
 
 def checar_usuario(email, tipo, categoria, acessos):
