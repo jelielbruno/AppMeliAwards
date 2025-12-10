@@ -32,22 +32,20 @@ def to_number(value):
     except Exception:
         return np.nan
 
+# OBS: vamos parar de mandar texto com vírgula para o Sheets.
+# Em vez disso, manteremos os valores como float e deixaremos o formato (vírgula)
+# ser controlado pelo próprio Google Sheets (formatação de célula).
 def format_float_with_comma(value, ndigits=1):
-    """
-    Converte float para string com vírgula:
-      2.7 -> '2,7', 2.0 -> '2,0', respeitando casas decimais.
-    """
+    """MANTIDA para eventual uso interno, mas não será usada ao gravar no Sheets."""
     try:
         f = float(value)
     except Exception:
         return value
-    s = f"{f:.{ndigits}f}"  # '2.7'
-    return s.replace(".", ",")  # '2,7'
+    s = f"{f:.{ndigits}f}"
+    return s.replace(".", ",")
 
 def format_df_notes_with_comma(df, pergunta_cols, ponderada_cols, ndigits=1):
-    """
-    Formata colunas de notas puras e ponderadas como strings com vírgula.
-    """
+    """NÃO usaremos mais ao enviar ao Sheets, mantida só se precisar exibir no app."""
     df = df.copy()
     for col in pergunta_cols + ponderada_cols:
         if col in df.columns:
@@ -111,10 +109,12 @@ def atualizar_em_blocos(worksheet, df, colunas_perguntas, colunas_ponderada, blo
     """
     Envia o DataFrame ao Sheets em blocos, com:
     - cabeçalhos na primeira linha
-    - notas puras e ponderadas formatadas com vírgula
+    - notas puras e ponderadas como FLOAT (não texto)
     - value_input_option="RAW".
+    O formato (vírgula/ponto) deve ser ajustado no próprio Google Sheets
+    via formatação de célula.
     """
-    df_envio = format_df_notes_with_comma(df, colunas_perguntas, colunas_ponderada, ndigits=1)
+    df_envio = df.copy()
     headers = [df_envio.columns.tolist()]
     data = df_envio.values.tolist()
     worksheet.clear()
